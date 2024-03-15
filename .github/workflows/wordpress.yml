@@ -1,0 +1,31 @@
+name: WordPress CI
+
+on:
+  push:
+    branches: [main, 'feature/**']
+    paths:
+      - 'wordpress/**'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: '8.0' # Specify the PHP version you want to use
+
+    - name: Install dependencies
+      run: composer install
+      working-directory: ./wordpress
+
+    - name: Run tests
+      run: vendor/bin/phpunit
+      working-directory: ./wordpress
+
+    - name: Lint
+      run: vendor/bin/phpcs --standard=WordPress
+      working-directory: ./wordpress
