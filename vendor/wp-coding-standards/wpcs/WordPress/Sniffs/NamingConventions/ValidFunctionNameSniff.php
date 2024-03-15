@@ -1,182 +1,188 @@
 <?php
 /**
- * Enforces WordPress function name format, based upon Squiz code
+ * WordPress Coding Standard.
  *
- * PHP version 5
- *
- * @category PHP
- * @package  PHP_CodeSniffer
- * @author   John Godley <john@urbangiraffe.com>
+ * @package WPCS\WordPressCodingStandards
+ * @link    https://github.com/WordPress/WordPress-Coding-Standards
+ * @license https://opensource.org/licenses/MIT MIT
  */
+
+namespace WordPressCS\WordPress\Sniffs\NamingConventions;
+
+use PHP_CodeSniffer\Util\Tokens;
+use PHPCSUtils\Utils\FunctionDeclarations;
+use PHPCSUtils\Utils\NamingConventions;
+use PHPCSUtils\Utils\ObjectDeclarations;
+use PHPCSUtils\Utils\Scopes;
+use WordPressCS\WordPress\Helpers\DeprecationHelper;
+use WordPressCS\WordPress\Helpers\SnakeCaseHelper;
+use WordPressCS\WordPress\Sniff;
 
 /**
- * Enforces WordPress array format
+ * Enforces WordPress function name and method name format, based upon Squiz code.
  *
- * @category PHP
- * @package  PHP_CodeSniffer
- * @author   John Godley <john@urbangiraffe.com>
+ * @link https://developer.wordpress.org/coding-standards/wordpress-coding-standards/php/#naming-conventions
+ *
+ * @since 0.1.0
+ * @since 0.13.0 Class name changed: this class is now namespaced.
+ * @since 2.0.0  The `get_name_suggestion()` method has been moved to the
+ *               WordPress native `Sniff` base class as `get_snake_case_name_suggestion()`.
+ * @since 2.2.0  Will now ignore functions and methods which are marked as @deprecated.
+ * @since 3.0.0  This sniff has been refactored and no longer extends the upstream
+ *               PEAR.NamingConventions.ValidFunctionName sniff.
  */
-class WordPress_Sniffs_NamingConventions_ValidFunctionNameSniff extends PEAR_Sniffs_NamingConventions_ValidFunctionNameSniff
-{
-
-    private $_magicMethods = array(
-                              'construct',
-                              'destruct',
-                              'call',
-                              'callStatic',
-                              'get',
-                              'set',
-                              'isset',
-                              'unset',
-                              'sleep',
-                              'wakeup',
-                              'toString',
-                              'set_state',
-                              'clone',
-                              'invoke'
-                             );
-
-
-    /**
-     * Processes the tokens outside the scope.
-     *
-     * @param PHP_CodeSniffer_File $phpcsFile The file being processed.
-     * @param int                  $stackPtr  The position where this token was
-     *                                        found.
-     *
-     * @return void
-     */
-    protected function processTokenOutsideScope(PHP_CodeSniffer_File $phpcsFile, $stackPtr)
-    {
-        $functionName = $phpcsFile->getDeclarationName($stackPtr);
-
-        if (strtolower($functionName) !== $functionName) {
-            $suggested = preg_replace('/([A-Z])/', '_$1', $functionName);
-            $suggested = strtolower($suggested);
-            $suggested = str_replace('__', '_', $suggested);
-
-            $error = "Function name \"$functionName\" is in camel caps format, try '".$suggested."'";
-            $phpcsFile->addError($error, $stackPtr, 'FunctionNameInvalid');
-        }
-
-    }//end processTokenOutsideScope()
-
-
-    /**
-     * Processes the tokens within the scope.
-     *
-     * @param PHP_CodeSniffer_File $phpcsFile The file being processed.
-     * @param int                  $stackPtr  The position where this token was
-     *                                        found.
-     * @param int                  $currScope The position of the current scope.
-     *
-     * @return void
-     */
-    protected function processTokenWithinScope(PHP_CodeSniffer_File $phpcsFile, $stackPtr, $currScope)
-    {
-        $className  = $phpcsFile->getDeclarationName($currScope);
-        $methodName = $phpcsFile->getDeclarationName($stackPtr);
-
-        // Is this a magic method. IE. is prefixed with "__".
-        if (preg_match('|^__|', $methodName) !== 0) {
-            $magicPart = substr($methodName, 2);
-            if (in_array($magicPart, $this->_magicMethods) === false) {
-                 $error = "Method name \"$className::$methodName\" is invalid; only PHP magic methods should be prefixed with a double underscore";
-                 $phpcsFile->addError($error, $stackPtr, 'MethodDoubleUnderscore');
-            }
-
-            return;
-        }
-
-        // PHP4 constructors are allowed to break our rules.
-        if ($methodName === $className) {
-            return;
-        }
-
-        // PHP4 destructors are allowed to break our rules.
-        if ($methodName === '_'.$className) {
-            return;
-        }
-
-        // If this is a child class, it may have to use camelCase.
-        if ( $phpcsFile->findExtendedClassName( $currScope ) || $this->findImplementedInterfaceName( $currScope, $phpcsFile ) ) {
-            return;
-        }
-
-        $methodProps    = $phpcsFile->getMethodProperties($stackPtr);
-        $scope          = $methodProps['scope'];
-        $scopeSpecified = $methodProps['scope_specified'];
-
-        if ($methodProps['scope'] === 'private')
-            $isPublic = false;
-        else
-            $isPublic = true;
-
-        // If the scope was specified on the method, then the method must be
-        // camel caps and an underscore should be checked for. If it wasn't
-        // specified, treat it like a public method and remove the underscore
-        // prefix if there is one because we can't determine if it is private or
-        // public.
-        $testMethodName = $methodName;
-        if ($scopeSpecified === false && $methodName{0} === '_') {
-            $testMethodName = substr($methodName, 1);
-        }
-
-        if (strtolower($testMethodName) !== $testMethodName) {
-            $suggested = preg_replace('/([A-Z])/', '_$1', $methodName);
-            $suggested = strtolower($suggested);
-            $suggested = str_replace('__', '_', $suggested);
-
-            $error = "Function name \"$methodName\" is in camel caps format, try '".$suggested."'";
-            $phpcsFile->addError($error, $stackPtr, 'FunctionNameInvalid');
-        }
-
-    }//end processTokenWithinScope()
+final class ValidFunctionNameSniff extends Sniff {
 
 	/**
-	 * Returns the name of the class that the specified class implements.
+	 * Returns an array of tokens this test wants to listen for.
 	 *
-	 * Returns FALSE on error or if there is no implemented class name.
+	 * @since 3.0.0
 	 *
-	 * @param int $stackPtr The stack position of the class.
-	 * @param PHP_CodeSniffer_File $phpcsFile The stack position of the class.
-	 *
-	 * @see PEAR_Sniffs_NamingConventions_ValidFunctionNameSniff::findExtendedClassName()
-	 *
-	 * @todo This needs to be upstreamed and made part of PHP_CodeSniffer_File.
-	 *
-	 * @return string
+	 * @return array
 	 */
-	public function findImplementedInterfaceName( $stackPtr, $phpcsFile ) {
-		$tokens = $phpcsFile->getTokens();
+	public function register() {
+		return array( \T_FUNCTION );
+	}
 
-		// Check for the existence of the token.
-		if ( isset( $tokens[ $stackPtr ] ) === false ) {
-			return false;
-		}
-		if ( $tokens[ $stackPtr ]['code'] !== T_CLASS ) {
-			return false;
-		}
-		if ( isset( $tokens[ $stackPtr ]['scope_closer'] ) === false ) {
-			return false;
-		}
-		$classOpenerIndex = $tokens[ $stackPtr ]['scope_opener'];
-		$extendsIndex = $phpcsFile->findNext( T_IMPLEMENTS, $stackPtr, $classOpenerIndex );
-		if ( false === $extendsIndex ) {
-			return false;
-		}
-		$find = array(
-			T_NS_SEPARATOR,
-			T_STRING,
-			T_WHITESPACE,
-		);
-		$end  = $phpcsFile->findNext( $find, ( $extendsIndex + 1 ), $classOpenerIndex + 1, true );
-		$name = $phpcsFile->getTokensAsString( ( $extendsIndex + 1 ), ( $end - $extendsIndex - 1 ) );
-		$name = trim( $name );
-		if ( $name === '' ) {
-			return false;
-		}
-		return $name;
-	}//end findExtendedClassName()
+	/**
+	 * Processes this test, when one of its tokens is encountered.
+	 *
+	 * @since 3.0.0
+	 *
+	 * @param int $stackPtr The position of the current token in the stack.
+	 *
+	 * @return int|void Integer stack pointer to skip forward or void to continue
+	 *                  normal file processing.
+	 */
+	public function process_token( $stackPtr ) {
 
-}//end class
+		if ( DeprecationHelper::is_function_deprecated( $this->phpcsFile, $stackPtr ) === true ) {
+			/*
+			 * Deprecated functions don't have to comply with the naming conventions,
+			 * otherwise functions deprecated in favour of a function with a compliant
+			 * name would still trigger an error.
+			 */
+			return;
+		}
+
+		$name = FunctionDeclarations::getName( $this->phpcsFile, $stackPtr );
+		if ( empty( $name ) === true ) {
+			// Live coding or parse error.
+			return;
+		}
+
+		if ( '' === ltrim( $name, '_' ) ) {
+			// Ignore special functions, like __().
+			return;
+		}
+
+		$ooPtr = Scopes::validDirectScope( $this->phpcsFile, $stackPtr, Tokens::$ooScopeTokens );
+		if ( false === $ooPtr ) {
+			$this->process_function_declaration( $stackPtr, $name );
+		} else {
+			$this->process_method_declaration( $stackPtr, $name, $ooPtr );
+		}
+	}
+
+	/**
+	 * Processes a function declaration for a function in the global namespace.
+	 *
+	 * @since 0.1.0
+	 * @since 3.0.0 Renamed from `processTokenOutsideScope()` to `process_function_declaration()`.
+	 *              Method signature has been changed as well as this method no longer overloads
+	 *              a method from the PEAR sniff which was previously the sniff parent.
+	 *
+	 * @param int    $stackPtr     The position where this token was found.
+	 * @param string $functionName The name of the function.
+	 *
+	 * @return void
+	 */
+	protected function process_function_declaration( $stackPtr, $functionName ) {
+		// PHP magic functions are exempt from our rules.
+		if ( FunctionDeclarations::isMagicFunctionName( $functionName ) === true ) {
+			return;
+		}
+
+		// Is the function name prefixed with "__" ?
+		if ( preg_match( '`^__[^_]`', $functionName ) === 1 ) {
+			$error     = 'Function name "%s" is invalid; only PHP magic methods should be prefixed with a double underscore';
+			$errorData = array( $functionName );
+			$this->phpcsFile->addError( $error, $stackPtr, 'FunctionDoubleUnderscore', $errorData );
+		}
+
+		$suggested_name = SnakeCaseHelper::get_suggestion( $functionName );
+		if ( $suggested_name !== $functionName ) {
+			$error     = 'Function name "%s" is not in snake case format, try "%s"';
+			$errorData = array(
+				$functionName,
+				$suggested_name,
+			);
+			$this->phpcsFile->addError( $error, $stackPtr, 'FunctionNameInvalid', $errorData );
+		}
+	}
+
+	/**
+	 * Processes a method declaration.
+	 *
+	 * @since 0.1.0
+	 * @since 3.0.0 Renamed from `processTokenWithinScope()` to `process_method_declaration()`.
+	 *              Method signature has been changed as well, as this method no longer overloads
+	 *              a method from the PEAR sniff which was previously the sniff parent.
+	 *
+	 * @param int    $stackPtr   The position where this token was found.
+	 * @param string $methodName The name of the method.
+	 * @param int    $currScope  The position of the current scope.
+	 *
+	 * @return void
+	 */
+	protected function process_method_declaration( $stackPtr, $methodName, $currScope ) {
+
+		if ( \T_ANON_CLASS === $this->tokens[ $currScope ]['code'] ) {
+			$className = '[Anonymous Class]';
+		} else {
+			$className = ObjectDeclarations::getName( $this->phpcsFile, $currScope );
+
+			// PHP4 constructors are allowed to break our rules.
+			if ( NamingConventions::isEqual( $methodName, $className ) === true ) {
+				return;
+			}
+
+			// PHP4 destructors are allowed to break our rules.
+			if ( NamingConventions::isEqual( $methodName, '_' . $className ) === true ) {
+				return;
+			}
+		}
+
+		// PHP magic methods are exempt from our rules.
+		if ( FunctionDeclarations::isMagicMethodName( $methodName ) === true ) {
+			return;
+		}
+
+		$extended   = ObjectDeclarations::findExtendedClassName( $this->phpcsFile, $currScope );
+		$interfaces = ObjectDeclarations::findImplementedInterfaceNames( $this->phpcsFile, $currScope );
+
+		// If this is a child class or interface implementation, it may have to use camelCase or double underscores.
+		if ( ! empty( $extended ) || ! empty( $interfaces ) ) {
+			return;
+		}
+
+		// Is the method name prefixed with "__" ?
+		if ( preg_match( '`^__[^_]`', $methodName ) === 1 ) {
+			$error     = 'Method name "%s" is invalid; only PHP magic methods should be prefixed with a double underscore';
+			$errorData = array( $className . '::' . $methodName );
+			$this->phpcsFile->addError( $error, $stackPtr, 'MethodDoubleUnderscore', $errorData );
+		}
+
+		// Check for all lowercase.
+		$suggested_name = SnakeCaseHelper::get_suggestion( $methodName );
+		if ( $suggested_name !== $methodName ) {
+			$error     = 'Method name "%s" in class %s is not in snake case format, try "%s"';
+			$errorData = array(
+				$methodName,
+				$className,
+				$suggested_name,
+			);
+			$this->phpcsFile->addError( $error, $stackPtr, 'MethodNameInvalid', $errorData );
+		}
+	}
+}
